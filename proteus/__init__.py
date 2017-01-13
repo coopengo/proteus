@@ -3,7 +3,7 @@
 '''
 A library to access Tryton's models like a client.
 '''
-__version__ = "4.0.4"
+__version__ = "4.2.1"
 __all__ = ['Model', 'Wizard', 'Report']
 import sys
 try:
@@ -874,15 +874,15 @@ class Model(object):
             if definition['type'] in ('one2many', 'many2many'):
                 if value and len(value) and isinstance(value[0], (int, long)):
                     self._values[field] = value
-                    continue
-                relation = Model.get(definition['relation'], self._config)
-                records = []
-                for vals in (value or []):
-                    record = relation()
-                    record._default_set(vals)
-                    records.append(record)
-                self._values[field] = ModelList(definition, records, self,
-                    field)
+                else:
+                    relation = Model.get(definition['relation'], self._config)
+                    records = []
+                    for vals in (value or []):
+                        record = relation()
+                        record._default_set(vals)
+                        records.append(record)
+                    self._values[field] = ModelList(definition, records, self,
+                        field)
             else:
                 self._values[field] = value
             fieldnames.append(field)
@@ -1136,9 +1136,14 @@ class Report(object):
         self._proxy = self._config.get_proxy(name, type='report')
 
     def execute(self, models=None, data=None):
-        if data is None:
-            data = {}
         ids = [m.id for m in models] if models else data.get('ids', [])
+        if data is None:
+            data = {
+                'id': ids[0],
+                'ids': ids,
+                }
+            if models:
+                data['model'] = models[0].__class__.__name__
         return self._proxy.execute(ids, data, self._context)
 
 

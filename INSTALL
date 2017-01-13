@@ -7,7 +7,6 @@ Prerequisites
  * Python 2.7 or later (http://www.python.org/)
  * python-dateutil (http://labix.org/python-dateutil)
  * Optional: trytond (http://www.tryton.org/)
- * Optional: simplejson (http://undefined.org/python/#simplejson)
  * Optional: cdecimal (http://www.bytereef.org/mpdecimal/index.html)
 
 Installation
@@ -25,5 +24,5 @@ site-packages directory on your system.
 For advanced options, please refer to the easy_install and/or the distutils
 documentation:
 
-  http://peak.telecommunity.com/DevCenter/EasyInstall
+  http://setuptools.readthedocs.io/en/latest/easy_install.html
   http://docs.python.org/inst/inst.html
