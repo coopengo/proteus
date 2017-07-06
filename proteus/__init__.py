@@ -707,7 +707,7 @@ class Model(object):
             self._default_get()
 
         for field_name, value in kwargs.items():
-            if field_name.endswith('.'):
+            if field_name.endswith('.rec_name'):
                 continue
             definition = self._fields[field_name]
             if definition['type'] in ('one2many', 'many2many'):
@@ -728,6 +728,8 @@ class Model(object):
                         relation = Model.get(
                             definition['relation'], self._config)
                         value = relation(value)
+                        if field_name + '.rec_name' in kwargs:
+                            value.rec_name = kwargs[field_name + '.rec_name']
                 setattr(self, field_name, value)
     __init__.__doc__ = object.__init__.__doc__
 
