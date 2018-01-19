@@ -1,5 +1,8 @@
-Version 4.4.1 - 2017-11-07
+Version 4.6.0 - 2017-10-30
 * Bug fixes (see mercurial logs for details)
+* Add set_sequence method to ModelList
+* Add __int__ to Model
+* Allow to use keyword arguments with trytond configuration
 
 Version 4.4.0 - 2017-05-01
 * Bug fixes (see mercurial logs for details)
