@@ -19,7 +19,7 @@ from decimal import Decimal
 
 import proteus.config
 
-__version__ = "4.8.1"
+__version__ = "4.8.3"
 __all__ = ['Model', 'Wizard', 'Report']
 
 _MODELS = threading.local()
@@ -659,7 +659,7 @@ class ModelList(list):
                     update = True
                 elif prev and record.id >= 0:
                     update = record.id < prev.id
-            if value == index:
+            elif value == index:
                 if prev and record.id >= 0:
                     update = record.id < prev.id
             elif value <= (index or 0):
@@ -1176,11 +1176,7 @@ class Wizard(object):
                 ctx['action_id'] = None
 
             if self.form:
-                # Filter only modified values
-                data = {self.form_state:
-                    dict((k, v) for k, v in
-                        self.form._get_on_change_values().iteritems()
-                        if k in self.form._values)}
+                data = {self.form_state: self.form._get_on_change_values()}
             else:
                 data = {}
 
