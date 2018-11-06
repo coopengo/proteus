@@ -3,12 +3,12 @@
 """
 Configuration functions for the proteus package for Tryton.
 """
-from __future__ import with_statement
+
 import datetime
 import os
 import threading
-import urlparse
-import xmlrpclib
+import urllib.parse
+import xmlrpc.client
 from decimal import Decimal
 
 __all__ = ['set_trytond', 'set_xmlrpc', 'get_config']
@@ -23,7 +23,7 @@ def dump_decimal(self, value, write):
 
 def dump_bytes(self, value, write):
     self.write = write
-    value = xmlrpclib.Binary(value)
+    value = xmlrpc.client.Binary(value)
     value.encode(self)
     del self.write
 
@@ -53,13 +53,13 @@ def dump_timedelta(self, value, write):
         }
     self.dump_struct(value, write)
 
-xmlrpclib.Marshaller.dispatch[Decimal] = dump_decimal
-xmlrpclib.Marshaller.dispatch[datetime.date] = dump_date
-xmlrpclib.Marshaller.dispatch[datetime.time] = dump_time
-xmlrpclib.Marshaller.dispatch[datetime.timedelta] = dump_timedelta
+xmlrpc.client.Marshaller.dispatch[Decimal] = dump_decimal
+xmlrpc.client.Marshaller.dispatch[datetime.date] = dump_date
+xmlrpc.client.Marshaller.dispatch[datetime.time] = dump_time
+xmlrpc.client.Marshaller.dispatch[datetime.timedelta] = dump_timedelta
 if bytes != str:
-    xmlrpclib.Marshaller.dispatch[bytes] = dump_bytes
-xmlrpclib.Marshaller.dispatch[bytearray] = dump_bytes
+    xmlrpc.client.Marshaller.dispatch[bytes] = dump_bytes
+xmlrpc.client.Marshaller.dispatch[bytearray] = dump_bytes
 
 
 class XMLRPCDecoder(object):
@@ -97,7 +97,7 @@ def end_struct(self, data):
     self._stack[mark:] = [dct]
     self._value = 0
 
-xmlrpclib.Unmarshaller.dispatch['struct'] = end_struct
+xmlrpc.client.Unmarshaller.dispatch['struct'] = end_struct
 
 _CONFIG = threading.local()
 _CONFIG.current = None
@@ -162,6 +162,7 @@ class _TrytondMethod(object):
         from trytond.rpc import RPC
         from trytond.tools import is_instance_method
         from trytond.transaction import Transaction
+        from trytond.worker import run_task
 
         if self._name in self._object.__rpc__:
             rpc = self._object.__rpc__[self._name]
@@ -186,8 +187,10 @@ class _TrytondMethod(object):
                 else:
                     result = [rpc.result(meth(i, *args, **kwargs))
                         for i in inst]
-            if not rpc.readonly:
-                transaction.commit()
+            transaction.commit()
+        while transaction.tasks:
+            task_id = transaction.tasks.pop()
+            run_task(self._config.database_name, task_id)
         return result
 
 
@@ -223,7 +226,7 @@ class TrytondConfig(Config):
         self.database = database
         database_name = None
         if database:
-            uri = urlparse.urlparse(database)
+            uri = urllib.parse.urlparse(database)
             database_name = uri.path.strip('/')
         if not database_name:
             database_name = os.environ['DB_NAME']
@@ -304,7 +307,7 @@ class XmlrpcConfig(Config):
     def __init__(self, url, **kwargs):
         super(XmlrpcConfig, self).__init__()
         self.url = url
-        self.server = xmlrpclib.ServerProxy(
+        self.server = xmlrpc.client.ServerProxy(
             url, allow_none=1, use_datetime=1, **kwargs)
         # TODO add user
         self.user = None

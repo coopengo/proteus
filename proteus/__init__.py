@@ -3,15 +3,6 @@
 '''
 A library to access Tryton's models like a client.
 '''
-import sys
-try:
-    import cdecimal
-    # Use cdecimal globally
-    if 'decimal' not in sys.modules:
-        sys.modules['decimal'] = cdecimal
-except ImportError:
-    import decimal
-    sys.modules['cdecimal'] = decimal
 import threading
 import datetime
 import functools
@@ -19,7 +10,7 @@ from decimal import Decimal
 
 import proteus.config
 
-__version__ = "4.8.3"
+__version__ = "5.0.1"
 __all__ = ['Model', 'Wizard', 'Report']
 
 _MODELS = threading.local()
@@ -56,7 +47,7 @@ class _EvalEnvironment(dict):
             pass
         return super(_EvalEnvironment, self).get(item, default)
 
-    def __nonzero__(self):
+    def __bool__(self):
         return True
 
     def __str__(self):
@@ -84,7 +75,7 @@ class dualmethod(object):
     >>> class Example(object):
     ...     @dualmethod
     ...     def method(cls, instances):
-    ...         print len(instances)
+    ...         print(len(instances))
     ...
     >>> Example.method([Example()])
     1
@@ -144,7 +135,7 @@ class CharDescriptor(FieldDescriptor):
     default = None
 
     def __set__(self, instance, value):
-        assert isinstance(value, basestring) or value is None
+        assert isinstance(value, str) or value is None
         super(CharDescriptor, self).__set__(instance, value or '')
 
 
@@ -159,14 +150,14 @@ class BinaryDescriptor(FieldDescriptor):
 class IntegerDescriptor(FieldDescriptor):
 
     def __set__(self, instance, value):
-        assert isinstance(value, (int, long, type(None)))
+        assert isinstance(value, (int, type(None)))
         super(IntegerDescriptor, self).__set__(instance, value)
 
 
 class FloatDescriptor(FieldDescriptor):
 
     def __set__(self, instance, value):
-        assert isinstance(value, (int, long, float, Decimal, type(None)))
+        assert isinstance(value, (int, float, Decimal, type(None)))
         if value is not None:
             value = float(value)
         super(FloatDescriptor, self).__set__(instance, value)
@@ -183,7 +174,7 @@ class NumericDescriptor(FieldDescriptor):
 class ReferenceDescriptor(FieldDescriptor):
     def __get__(self, instance, owner):
         value = super(ReferenceDescriptor, self).__get__(instance, owner)
-        if isinstance(value, basestring):
+        if isinstance(value, str):
             model_name, id = value.split(',', 1)
             if model_name:
                 Relation = Model.get(model_name, instance._config)
@@ -195,8 +186,8 @@ class ReferenceDescriptor(FieldDescriptor):
         return value
 
     def __set__(self, instance, value):
-        assert isinstance(value, (Model, type(None), basestring))
-        if isinstance(value, basestring):
+        assert isinstance(value, (Model, type(None), str))
+        if isinstance(value, str):
             assert value.startswith(',')
         elif isinstance(value, Model):
             assert value._config == instance._config
@@ -250,7 +241,7 @@ class Many2OneDescriptor(FieldDescriptor):
     def __get__(self, instance, owner):
         Relation = Model.get(self.definition['relation'], instance._config)
         value = super(Many2OneDescriptor, self).__get__(instance, owner)
-        if isinstance(value, (int, long)):
+        if isinstance(value, int):
             config = Relation._config
             with config.reset_context(), config.set_context(instance._context):
                 value = Relation(value)
@@ -465,7 +456,7 @@ class MetaModelFactory(object):
                 dict['_proxy'] = proxy
                 dict['_config'] = self.config
                 dict['_fields'] = proxy.fields_get(None, context)
-                for field_name, definition in dict['_fields'].iteritems():
+                for field_name, definition in dict['_fields'].items():
                     if field_name == 'id':
                         continue
                     Descriptor = self.descriptors.get(definition['type'],
@@ -528,11 +519,9 @@ class ModelList(list):
 
     def __check(self, records, on_change=True):
         config = None
-        context = self._get_context()
         for record in records:
             assert isinstance(record, Model)
             assert record.__class__.__name__ == self.model_name
-            assert record._context == context, (record._context, context)
             if self.parent:
                 assert record._config == self.parent._config
             elif self:
@@ -541,14 +530,10 @@ class ModelList(list):
                 assert record._config == config
             else:
                 config = record._config
+            if record._group is not self:
+                assert record._group is None
+                record._group = self
         for record in records:
-            assert record._parent is None
-            assert not record._parent_field_name
-            assert not record._parent_name
-            record._parent = self.parent
-            record._parent_field_name = self.parent_field_name
-            record._parent_name = self.parent_name
-
             # Set parent field to trigger on_change
             if (on_change
                     and self.parent
@@ -580,9 +565,7 @@ class ModelList(list):
 
     def pop(self, index=-1):
         self.record_removed.add(self[index])
-        self[index]._parent = None
-        self[index]._parent_field_name = ''
-        self[index]._parent_name = ''
+        self[index]._group = None
         res = super(ModelList, self).pop(index)
         self._changed()
         return res
@@ -591,9 +574,7 @@ class ModelList(list):
     def remove(self, record, _changed=True):
         if record.id >= 0:
             self.record_deleted.add(record)
-        record._parent = None
-        record._parent_field_name = ''
-        record._parent_name = ''
+        record._group = None
         res = super(ModelList, self).remove(record)
         if _changed:
             self._changed()
@@ -614,15 +595,7 @@ class ModelList(list):
         config = Relation._config
         with config.reset_context(), config.set_context(self._get_context()):
             # Set parent for on_change calls from default_get
-            new_record = Relation(
-                _parent=self.parent,
-                _parent_field_name=self.parent_field_name,
-                _parent_name=self.parent_name,
-                **kwargs)
-        # Remove parent to pass __check test
-        new_record._parent = None
-        new_record._parent_field_name = ''
-        new_record._parent_name = ''
+            new_record = Relation(_group=self, **kwargs)
         self.append(new_record)
         return new_record
 
@@ -683,9 +656,7 @@ class Model(object):
     _config = None
     _fields = None
 
-    def __init__(self, id=None, _default=True,
-            _parent=None, _parent_field_name='', _parent_name='',
-            **kwargs):
+    def __init__(self, id=None, _default=True, _group=None, **kwargs):
         super(Model, self).__init__()
         if id:
             assert not kwargs
@@ -694,16 +665,12 @@ class Model(object):
             Model.__counter -= 1
         self._values = {}  # store the values of fields
         self._changed = set()  # store the changed fields
-        self._parent = _parent  # store the parent record
-        # store the field name in parent record
-        self._parent_field_name = _parent_field_name
-        # store the field name to parent record
-        self._parent_name = _parent_name
-        self._context = self._config.context  # store the context
+        self._group = _group  # store the parent group
+        self.__context = self._config.context  # store the context
         if self.id < 0 and _default:
             self._default_get()
 
-        for field_name, value in kwargs.iteritems():
+        for field_name, value in kwargs.items():
             if field_name.endswith('.rec_name'):
                 continue
             definition = self._fields[field_name]
@@ -711,7 +678,7 @@ class Model(object):
                 relation = Model.get(definition['relation'], self._config)
 
                 def instantiate(v):
-                    if isinstance(v, (int, long)):
+                    if isinstance(v, int):
                         return relation(v)
                     elif isinstance(v, dict):
                         return relation(_default=_default, **v)
@@ -721,7 +688,7 @@ class Model(object):
                 getattr(self, field_name).extend(value)
             else:
                 if definition['type'] == 'many2one':
-                    if isinstance(value, (int, long)):
+                    if isinstance(value, int):
                         relation = Model.get(
                             definition['relation'], self._config)
                         value = relation(value)
@@ -730,14 +697,39 @@ class Model(object):
                 setattr(self, field_name, value)
     __init__.__doc__ = object.__init__.__doc__
 
+    @property
+    def _parent(self):
+        if self._group is not None:
+            return self._group.parent
+
+    @property
+    def _parent_field_name(self):
+        if self._group is not None:
+            return self._group.parent_field_name
+        return ''
+
+    @property
+    def _parent_name(self):
+        if self._group is not None:
+            return self._group.parent_name
+        return ''
+
+    @property
+    def _context(self):
+        if self._group:
+            context = self._group._get_context()
+        else:
+            context = self.__context
+        return context
+
     @classmethod
     def get(cls, name, config=None):
         'Get a class for the named Model'
-        if (bytes == str) and isinstance(name, unicode):
+        if (bytes == str) and isinstance(name, str):
             name = name.encode('utf-8')
 
-        class Spam(Model):
-            __metaclass__ = MetaModelFactory(name, config=config)()
+        class Spam(Model, metaclass=MetaModelFactory(name, config=config)()):
+            pass
         return Spam
 
     @classmethod
@@ -909,7 +901,7 @@ class Model(object):
         'Return dictionary with timestamps'
         result = {'%s,%s' % (self.__class__.__name__, self.id):
                 self._timestamp}
-        for field, definition in self._fields.iteritems():
+        for field, definition in self._fields.items():
             if field not in self._values:
                 continue
             if definition['type'] in ('one2many', 'many2many'):
@@ -924,7 +916,7 @@ class Model(object):
             return
         loading = self._fields[name]['loading']
         if loading == 'eager':
-            fields = [x for x, y in self._fields.iteritems()
+            fields = [x for x, y in self._fields.items()
                     if y['loading'] == 'eager']
         if not self._fields:
             fields.append('_timestamp')
@@ -939,30 +931,27 @@ class Model(object):
 
     def _default_get(self):
         'Set default values'
-        fields = self._fields.keys()
+        fields = list(self._fields.keys())
         self._default_set(
             self._proxy.default_get(fields, False, self._context))
 
     def _default_set(self, values):
         fieldnames = []
-        for field, value in values.iteritems():
+        for field, value in values.items():
             if '.' in field:
                 continue
             definition = self._fields[field]
             if definition['type'] in ('one2many', 'many2many'):
-                if value and len(value) and isinstance(value[0], (int, long)):
+                if value and len(value) and isinstance(value[0], int):
                     self._values[field] = value
                 else:
                     Relation = Model.get(definition['relation'], self._config)
                     self._values[field] = records = ModelList(
                         definition, [], self, field)
-                    config = Relation._config
-                    with config.reset_context(), \
-                            config.set_context(records._get_context()):
-                        for vals in (value or []):
-                            record = Relation()
-                            record._default_set(vals)
-                            records.append(record)
+                    for vals in (value or []):
+                        record = Relation()
+                        record._default_set(vals)
+                        records.append(record)
             else:
                 self._values[field] = value
             fieldnames.append(field)
@@ -979,7 +968,7 @@ class Model(object):
         if fields:
             definitions = ((f, self._fields[f]) for f in fields)
         else:
-            definitions = self._fields.iteritems()
+            definitions = self._fields.items()
         for field, definition in definitions:
             if not fields:
                 if field == 'id' or (skip and field in skip):
@@ -1032,18 +1021,19 @@ class Model(object):
                 getattr(self, field).remove(record, _changed=False)
             if value and (value.get('add') or value.get('update')):
                 for index, vals in value.get('add', []):
+                    group = getattr(self, field)
                     Relation = Model.get(
                         self._fields[field]['relation'], self._config)
                     config = Relation._config
                     with config.reset_context(), \
                             config.set_context(self._context):
-                        record = Relation(_default=False)
+                        record = Relation(_group=group, _default=False)
                     record._set_on_change(vals)
                     # append without signal
                     if index == -1:
-                        list.append(getattr(self, field), record)
+                        list.append(group, record)
                     else:
-                        list.insert(getattr(self, field), index, record)
+                        list.insert(group, index, record)
                 for vals in value.get('update', []):
                     if 'id' not in vals:
                         continue
@@ -1051,7 +1041,7 @@ class Model(object):
                         if record.id == vals['id']:
                             record._set_on_change(vals)
         elif (self._fields[field]['type'] in ('one2many', 'many2many')
-                and len(value) and not isinstance(value[0], (int, long))):
+                and len(value) and not isinstance(value[0], int)):
             self._values[field] = []
             for vals in value:
                 Relation = Model.get(
@@ -1068,14 +1058,14 @@ class Model(object):
 
     def _set_on_change(self, values):
         later = {}
-        for field, value in values.iteritems():
+        for field, value in values.items():
             if field not in self._fields:
                 continue
             if self._fields[field]['type'] in ('one2many', 'many2many'):
                 later[field] = value
                 continue
             self._on_change_set(field, value)
-        for field, value in later.iteritems():
+        for field, value in later.items():
             self._on_change_set(field, value)
 
     def _on_change(self, names):
@@ -1089,7 +1079,7 @@ class Model(object):
             on_change = definition.get('on_change')
             if not on_change:
                 continue
-            if isinstance(on_change, basestring):
+            if isinstance(on_change, str):
                 definition['on_change'] = on_change = PYSONDecoder().decode(
                     on_change)
             values.update(self._on_change_args(on_change))
@@ -1103,7 +1093,7 @@ class Model(object):
         fieldnames = set(names)
         to_change = set()
         later = set()
-        for field, definition in self._fields.iteritems():
+        for field, definition in self._fields.items():
             on_change_with = definition.get('on_change_with')
             if not on_change_with:
                 continue
