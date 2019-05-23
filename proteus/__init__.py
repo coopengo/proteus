@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import proteus.config
 
-__version__ = "5.0.3"
+__version__ = "5.2.1"
 __all__ = ['Model', 'Wizard', 'Report']
 
 _MODELS = threading.local()
@@ -889,8 +889,15 @@ class Model(object):
         'Return dictionary values'
         if fields is None:
             fields = self._values.keys()
-        return dict((x, getattr(self, '__%s_value' % x)) for x in fields
-                if x not in ('id', '_timestamp'))
+        values = {}
+        for name in fields:
+            if name in ['id', '_timestamp']:
+                continue
+            definition = self._fields[name]
+            if definition.get('readonly') and definition['type'] != 'one2many':
+                continue
+            values[name] = getattr(self, '__%s_value' % name)
+        return values
 
     @property
     def _timestamp(self):
@@ -970,8 +977,10 @@ class Model(object):
         else:
             definitions = self._fields.items()
         for field, definition in definitions:
+            if field == 'id':
+                continue
             if not fields:
-                if field == 'id' or (skip and field in skip):
+                if skip and field in skip:
                     continue
                 if (self.id >= 0
                         and (field not in self._values
@@ -1004,7 +1013,6 @@ class Model(object):
                 scope = scope[i]
             else:
                 res[arg] = scope
-        res['id'] = self.id
         return res
 
     def _on_change_set(self, field, value):
