@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import proteus.config
 
-__version__ = "5.2.1"
+__version__ = "5.2.2"
 __all__ = ['Model', 'Wizard', 'Report']
 
 _MODELS = threading.local()
@@ -897,6 +897,10 @@ class Model(object):
             if definition.get('readonly') and definition['type'] != 'one2many':
                 continue
             values[name] = getattr(self, '__%s_value' % name)
+            # Sending an empty X2Many fields breaks ModelFieldAccess.check
+            if (definition['type'] in {'one2many', 'many2many'}
+                    and not values[name]):
+                del values[name]
         return values
 
     @property
