@@ -566,11 +566,12 @@ class ModelList(list):
         raise NotImplementedError
     insert.__doc__ = list.insert.__doc__
 
-    def pop(self, index=-1):
+    def pop(self, index=-1, _changed=True):
         self.record_removed.add(self[index])
         self[index]._group = None
         res = super(ModelList, self).pop(index)
-        self._changed()
+        if _changed:
+            self._changed()
         return res
     pop.__doc__ = list.pop.__doc__
 
@@ -1068,7 +1069,13 @@ class Model(object):
                     record = Relation(_default=False, **vals)
                 records.append(record)
         else:
-            self._values[field] = value
+            # JCA : Properly clear M2M fields following on_change
+            if self._fields[field]['type'] == 'many2many' and not value:
+                records = getattr(self, field)
+                while len(records):
+                    records.pop(_changed=False)
+            else:
+                self._values[field] = value
         self._changed.add(field)
 
     def _set_on_change(self, values):
