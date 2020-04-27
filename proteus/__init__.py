@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import proteus.config
 
-__version__ = "5.2.2"
+__version__ = "5.2.5"
 __all__ = ['Model', 'Wizard', 'Report']
 
 _MODELS = threading.local()
@@ -25,6 +25,8 @@ class _EvalEnvironment(dict):
         self.eval_type = eval_type
 
     def __getitem__(self, item):
+        if item == 'id':
+            return self.parent.id
         if item == '_parent_' + self.parent._parent_name \
                 and self.parent._parent:
             return _EvalEnvironment(self.parent._parent,
@@ -56,6 +58,8 @@ class _EvalEnvironment(dict):
     __repr__ = __str__
 
     def __contains__(self, item):
+        if item == 'id':
+            return True
         if item == '_parent_' + self.parent._parent_name \
                 and self.parent._parent:
             return True
@@ -106,12 +110,12 @@ class FieldDescriptor(object):
         self.__doc__ = definition['string']
 
     def __get__(self, instance, owner):
-        if instance.id > 0:
+        if instance.id >= 0:
             instance._read(self.name)
         return instance._values.get(self.name, self.default)
 
     def __set__(self, instance, value):
-        if instance.id > 0:
+        if instance.id >= 0:
             instance._read(self.name)
         previous = getattr(instance, self.name)
         instance._values[self.name] = value
@@ -662,9 +666,9 @@ class Model(object):
 
     def __init__(self, id=None, _default=True, _group=None, **kwargs):
         super(Model, self).__init__()
-        if id:
+        if id is not None:
             assert not kwargs
-        self.__id = id or Model.__counter
+        self.__id = id if id is not None else Model.__counter
         if self.__id < 0:
             Model.__counter -= 1
         self._values = {}  # store the values of fields
@@ -850,7 +854,7 @@ class Model(object):
             assert proxy == record._proxy
             assert config == record._config
             assert context == record._context
-            if record.id > 0:
+            if record.id >= 0:
                 timestamp.update(record._get_timestamp())
                 delete.append(record.id)
         context['_timestamp'] = timestamp
@@ -933,8 +937,7 @@ class Model(object):
         if loading == 'eager':
             fields = [x for x, y in self._fields.items()
                     if y['loading'] == 'eager']
-        if not self._fields:
-            fields.append('_timestamp')
+        fields.append('_timestamp')
         self._values.update(
             self._proxy.read([self.id], fields, self._context)[0])
         for field in fields:
@@ -1011,6 +1014,16 @@ class Model(object):
         return values
 
     def _on_change_args(self, args):
+        # Ensure arguments has been read
+        for arg in args:
+            record = self
+            for i in arg.split('.'):
+                if i in record._fields:
+                    getattr(record, i)
+                elif i == '_parent_' + record._parent_name:
+                    getattr(record, record._parent_name)
+                    record = record._parent
+
         res = {}
         values = _EvalEnvironment(self, 'on_change')
         for arg in args:
