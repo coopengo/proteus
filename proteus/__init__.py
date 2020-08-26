@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import proteus.config
 
-__version__ = "5.2.5"
+__version__ = "5.6.1"
 __all__ = ['Model', 'Wizard', 'Report']
 
 _MODELS = threading.local()
@@ -18,6 +18,8 @@ _MODELS = threading.local()
 
 class _EvalEnvironment(dict):
     'Dictionary for evaluation'
+    __slots__ = ('parent', 'eval_type')
+
     def __init__(self, parent, eval_type='eval'):
         super(_EvalEnvironment, self).__init__()
         self.parent = parent
@@ -55,7 +57,8 @@ class _EvalEnvironment(dict):
     def __str__(self):
         return str(self.parent)
 
-    __repr__ = __str__
+    def __repr__(self):
+        return repr(self.parent)
 
     def __contains__(self, item):
         if item == 'id':
@@ -86,6 +89,8 @@ class dualmethod(object):
     >>> Example().method()
     1
     """
+    __slots__ = ('func')
+
     def __init__(self, func):
         self.func = func
 
@@ -173,6 +178,22 @@ class NumericDescriptor(FieldDescriptor):
         assert isinstance(value, (type(None), Decimal))
         # TODO add digits validation
         super(NumericDescriptor, self).__set__(instance, value)
+
+
+class SelectionDescriptor(FieldDescriptor):
+
+    def __set__(self, instance, value):
+        assert isinstance(value, str) or value is None
+        # TODO add selection validation
+        super().__set__(instance, value)
+
+
+class MultiSelectionDescriptor(FieldDescriptor):
+
+    def __set__(self, instance, value):
+        assert isinstance(value, (list, type(None)))
+        # TODO add selection validation
+        super().__set__(instance, value)
 
 
 class ReferenceDescriptor(FieldDescriptor):
@@ -410,7 +431,8 @@ class MetaModelFactory(object):
         'char': CharDescriptor,
         'text': CharDescriptor,
         'binary': BinaryDescriptor,
-        'selection': CharDescriptor,  # TODO implement its own descriptor
+        'selection': SelectionDescriptor,
+        'multiselection': MultiSelectionDescriptor,
         'integer': IntegerDescriptor,
         'biginteger': IntegerDescriptor,
         'float': FloatDescriptor,
@@ -454,6 +476,8 @@ class MetaModelFactory(object):
 
         class MetaModel(type):
             'Meta class for Model'
+            __slots__ = ()
+
             def __new__(mcs, name, bases, dict):
                 if self.model_name in getattr(_MODELS, models_key):
                     return getattr(_MODELS, models_key)[self.model_name]
@@ -488,6 +512,9 @@ class MetaModelFactory(object):
 
 class ModelList(list):
     'List for Model'
+    __slots__ = ('model_name', 'parent', 'parent_field_name', 'parent_name',
+        'domain', 'context', 'add_remove', 'search_order', 'search_context',
+        'record_removed', 'record_deleted')
 
     def __init__(self, definition, sequence=None, parent=None,
             parent_field_name=''):
@@ -658,6 +685,7 @@ class ModelList(list):
 
 class Model(object):
     'Model class for Tryton records'
+    __slots__ = ('__id', '_values', '_changed', '_group', '__context')
 
     __counter = -1
     _proxy = None
@@ -737,7 +765,7 @@ class Model(object):
             name = name.encode('utf-8')
 
         class Spam(Model, metaclass=MetaModelFactory(name, config=config)()):
-            pass
+            __slots__ = ()
         return Spam
 
     @classmethod
@@ -753,8 +781,7 @@ class Model(object):
                 del models[name]
 
     def __str__(self):
-        return '<%s(%d)>' % (self.__class__.__name__, self.id)
-    __str__.__doc__ = object.__str__.__doc__
+        return '%s,%d' % (self.__class__.__name__, self.id)
 
     def __repr__(self):
         if self._config == proteus.config.get_config():
@@ -762,12 +789,11 @@ class Model(object):
                     self.id)
         return "proteus.Model.get('%s', %s)(%d)" % (self.__class__.__name__,
                 repr(self._config), self.id)
-    __repr__.__doc__ = object.__repr__.__doc__
 
     def __eq__(self, other):
         if isinstance(other, Model):
-            return ((self.__class__.__name__, self.id) ==
-                (other.__class__.__name__, other.id))
+            return ((self.__class__.__name__, self.id)
+                == (other.__class__.__name__, other.id))
         return NotImplemented
 
     def __ne__(self, other):
@@ -1039,30 +1065,39 @@ class Model(object):
     def _on_change_set(self, field, value):
         if (self._fields[field]['type'] in ('one2many', 'many2many')
                 and not isinstance(value, (list, tuple))):
-            to_remove = []
-            if value and value.get('remove'):
-                for record_id in value['remove']:
+            if value and value.get('delete'):
+                for record_id in value['delete']:
                     for record in getattr(self, field):
                         if record.id == record_id:
-                            to_remove.append(record)
-            for record in to_remove:
-                # remove without signal
-                getattr(self, field).remove(record, _changed=False)
+                            getattr(self, field).remove(record, _changed=False)
+            if value and value.get('remove'):
+                for record_id in value['remove']:
+                    for i, record in enumerate(getattr(self, field)):
+                        if record.id == record_id:
+                            getattr(self, field).pop(i, _changed=False)
             if value and (value.get('add') or value.get('update')):
                 for index, vals in value.get('add', []):
                     group = getattr(self, field)
                     Relation = Model.get(
                         self._fields[field]['relation'], self._config)
                     config = Relation._config
+                    id_ = vals.pop('id', None)
                     with config.reset_context(), \
                             config.set_context(self._context):
-                        record = Relation(_group=group, _default=False)
-                    record._set_on_change(vals)
-                    # append without signal
-                    if index == -1:
-                        list.append(group, record)
+                        record = Relation(id=id_, _group=group, _default=False)
+                    try:
+                        idx = group.index(record)
+                    except ValueError:
+                        # append without signal
+                        if index == -1:
+                            list.append(group, record)
+                        else:
+                            list.insert(group, index, record)
                     else:
-                        list.insert(group, index, record)
+                        record = group[idx]
+                        group.record_removed.discard(record)
+                        group.record_deleted.discard(record)
+                    record._set_on_change(vals)
                 for vals in value.get('update', []):
                     if 'id' not in vals:
                         continue
@@ -1159,6 +1194,9 @@ class Model(object):
 
 class Wizard(object):
     'Wizard class for Tryton wizards'
+    __slots__ = ('name', 'form', 'form_state', 'actions', '_config',
+        '_context', '_proxy', 'session_id', 'start_state', 'end_state',
+        'states', 'state', 'models', 'action')
 
     def __init__(self, name, models=None, action=None, config=None,
             context=None):
@@ -1237,6 +1275,7 @@ class Wizard(object):
 
 class Report(object):
     'Report class for Tryton reports'
+    __slots__ = ('name', '_config', '_context', '_proxy')
 
     def __init__(self, name, config=None, context=None):
         super(Report, self).__init__()
