@@ -16,7 +16,7 @@ Configuration to connect to a sqlite memory database using trytond as module.
 
     >>> config = config.set_trytond('sqlite:///:memory:')
 
-Installing a module
+Activating a module
 ~~~~~~~~~~~~~~~~~~~
 
 Find the module, call the activate button and run the upgrade wizard.
@@ -67,7 +67,7 @@ Creating an address for the party
 Addresses are store on party with a `One2Many` field. So the new address just
 needs to be appended to the list `addresses`.
 
-    >>> address = party.addresses.new(zip='42')
+    >>> address = party.addresses.new(postal_code='42')
     >>> party.save()
     >>> party.addresses #doctest: +ELLIPSIS
     [proteus.Model.get('party.address')(...)]
@@ -108,9 +108,9 @@ Sorting addresses and register order
 Addresses are ordered by sequence which means they can be stored following a
 specific order. The `set_sequence` method stores the current order.
 
-    >>> address = party.addresses.new(zip='69')
+    >>> address = party.addresses.new(postal_code='69')
     >>> party.save()
-    >>> address = party.addresses.new(zip='23')
+    >>> address = party.addresses.new(postal_code='23')
     >>> party.save()
 
 Now changing the order.
