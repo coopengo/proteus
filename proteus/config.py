@@ -11,7 +11,11 @@ import urllib.parse
 import xmlrpc.client
 from decimal import Decimal
 
+import defusedxml.xmlrpc
+
 __all__ = ['set_trytond', 'set_xmlrpc', 'get_config']
+
+defusedxml.xmlrpc.monkey_patch()
 
 
 def dump_decimal(self, value, write):
@@ -47,10 +51,20 @@ def dump_timedelta(self, value, write):
     self.dump_struct(value, write)
 
 
+def dump_long(self, value, write):
+    try:
+        self.dump_long(value, write)
+    except OverflowError:
+        write('<value><biginteger>')
+        write(str(int(value)))
+        write('</biginteger></value>\n')
+
+
 xmlrpc.client.Marshaller.dispatch[Decimal] = dump_decimal
 xmlrpc.client.Marshaller.dispatch[datetime.date] = dump_date
 xmlrpc.client.Marshaller.dispatch[datetime.time] = dump_time
 xmlrpc.client.Marshaller.dispatch[datetime.timedelta] = dump_timedelta
+xmlrpc.client.Marshaller.dispatch[int] = dump_long
 
 
 def dump_struct(self, value, write, escape=xmlrpc.client.escape):
