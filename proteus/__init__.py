@@ -707,7 +707,7 @@ class Model(object):
             self._default_get()
 
         for field_name, value in kwargs.items():
-            if field_name.endswith('.rec_name'):
+            if field_name.endswith('.rec_name') or field_name.endswith('.'):
                 continue
             definition = self._fields[field_name]
             if definition['type'] in ('one2many', 'many2many'):
